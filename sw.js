@@ -1,4 +1,4 @@
-const CACHE = 'meal-command-v2';
+const CACHE = 'meal-command-v3';
 const ASSETS = [
   './index.html',
   './manifest.json',

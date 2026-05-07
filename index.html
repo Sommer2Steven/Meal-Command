@@ -401,6 +401,47 @@
     margin-right: 4px;
   }
 
+  /* EAT SCHEDULE */
+  .eat-slot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    font-size: 13px;
+    min-height: 36px;
+  }
+  .eat-slot:hover { border-color: var(--muted); }
+  .eat-slot.eat-slot-filled { background: #1a1e14; border-color: #3a4a2a; }
+  .eat-slot.eat-slot-leftovers { background: #1e1a14; border-color: #4a3a20; }
+  .eat-slot-type {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    min-width: 12px;
+    flex-shrink: 0;
+  }
+  .eat-slot-name { flex: 1; line-height: 1.4; }
+  .eat-slot-add { color: var(--muted); font-size: 12px; }
+  .leftover-tag {
+    font-size: 10px;
+    background: #2a1e12;
+    color: #c49a54;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: 'DM Mono', monospace;
+    vertical-align: middle;
+    margin-right: 4px;
+    letter-spacing: 0.04em;
+  }
+
   /* EDIT MODAL */
   .modal-overlay {
     display: none;
@@ -625,6 +666,9 @@
 <div id="tab-schedule" class="tab-panel pb16">
   <p class="section-label">Cook day overview</p>
   <div id="schedule-display"></div>
+  <p class="section-label" style="margin-top:24px">Eat schedule</p>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px;font-family:'DM Mono',monospace">Tap any slot to assign a meal. Use Leftovers to split servings from 2 different meals.</div>
+  <div id="eat-schedule-display"></div>
   <p class="section-label" style="margin-top:20px">Budget & notes</p>
   <div class="budget-card" id="weekly-budget-card"></div>
   <div style="margin-top:16px">
@@ -714,6 +758,31 @@
   </div>
 </div>
 
+<!-- EAT SLOT MODAL -->
+<div class="modal-overlay" id="eat-slot-modal">
+  <div class="modal">
+    <div class="modal-title" id="eat-slot-modal-title">Assign Meal</div>
+    <div id="eat-slot-current"></div>
+    <p class="section-label" style="margin-top:4px">Select a meal from this week</p>
+    <div id="eat-slot-meal-list"></div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+      <p class="section-label" style="margin-top:0">Or schedule leftovers</p>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.5">Leftover <em>servings</em> from 2 different meals split for this slot — not eating from the full batch.</div>
+      <label>Leftover meal 1</label>
+      <select id="eat-leftover-1"></select>
+      <label>Leftover meal 2</label>
+      <select id="eat-leftover-2"></select>
+      <div style="margin-top:12px">
+        <button class="btn-primary" onclick="saveEatLeftovers()">Set as Leftovers</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-danger" id="eat-slot-clear-btn" onclick="clearEatSlot()">Clear Slot</button>
+      <button class="btn-secondary" onclick="closeEatSlotModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- BUDGET MODAL -->
 <div class="modal-overlay" id="budget-modal">
   <div class="modal">
@@ -738,6 +807,7 @@ const DEFAULT_DATA = {
   selectedSnacks: [],
   mealMultipliers: {},
   cookSelectedMeals: [],
+  eatSchedule: {},
   meals: [
     {id:"m1",name:"Sous Vide Chicken Breast",desc:"Juicy batch chicken — stays moist all week in the fridge",category:"Main Meals",cookDay:"Monday",protein:50,cal:280,cost:12,servings:8,gf:true,split:false,kids:true,
       ingredients:[{amt:"4 lbs",item:"Chicken breast"},{amt:"2 tbsp",item:"Butter"},{amt:"4 cloves",item:"Garlic, smashed"},{amt:"1 tsp",item:"Salt"},{amt:"1 tsp",item:"Garlic powder"},{amt:"1 tsp",item:"Paprika"},{amt:"4 sprigs",item:"Fresh thyme (optional)"}],
@@ -855,6 +925,7 @@ const DEFAULT_DATA = {
 // ===================== STATE =====================
 let state = JSON.parse(JSON.stringify(DEFAULT_DATA));
 let editingMealId = null;
+let editingEatSlot = null;
 
 function saveState() {
   try { localStorage.setItem('mealplanner', JSON.stringify(state)); } catch(e) {}
@@ -868,6 +939,7 @@ function loadState() {
       if (!state.mealMultipliers) state.mealMultipliers = {};
       if (!state.selectedSnacks) state.selectedSnacks = [];
       if (!state.itemPrices) state.itemPrices = {};
+      if (!state.eatSchedule) state.eatSchedule = {};
     }
   } catch(e) {}
 }
@@ -1499,6 +1571,139 @@ function renderSchedule() {
   const notesArea = document.getElementById('notes-area');
   notesArea.value = state.notes || '';
   notesArea.oninput = () => { state.notes = notesArea.value; saveState(); };
+
+  renderEatSchedule();
+}
+
+// ===================== EAT SCHEDULE =====================
+function renderEatSchedule() {
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const slotDefs = [
+    { key: 'breakfast', label: 'B', full: 'Breakfast' },
+    { key: 'lunch',     label: 'L', full: 'Lunch' },
+    { key: 'dinner',    label: 'D', full: 'Dinner' }
+  ];
+  let html = '';
+  days.forEach(day => {
+    html += `<div class="schedule-row" style="margin-bottom:12px">
+      <div class="schedule-day">${day.slice(0,3).toUpperCase()}</div>
+      <div class="schedule-meals" style="display:flex;flex-direction:column;gap:5px;flex:1">`;
+    slotDefs.forEach(slot => {
+      const key = day + '-' + slot.key;
+      const assignment = (state.eatSchedule || {})[key];
+      let cardClass = '';
+      let nameHtml = `<span class="eat-slot-add">+ ${slot.full}</span>`;
+      if (assignment) {
+        if (assignment.type === 'meal') {
+          const meal = state.meals.find(m => m.id === assignment.mealId);
+          nameHtml = meal ? meal.name : '<span style="color:var(--muted)">Unknown meal</span>';
+          cardClass = 'eat-slot-filled';
+        } else if (assignment.type === 'leftovers') {
+          const m1 = state.meals.find(m => m.id === assignment.meal1);
+          const m2 = state.meals.find(m => m.id === assignment.meal2);
+          nameHtml = `<span class="leftover-tag">LEFTOVERS</span>${m1 ? m1.name : '?'} <span style="color:var(--muted)">+</span> ${m2 ? m2.name : '?'}`;
+          cardClass = 'eat-slot-leftovers';
+        }
+      }
+      html += `<div class="eat-slot ${cardClass}" onclick="openEatSlotModal('${day}','${slot.key}')">
+        <span class="eat-slot-type">${slot.label}</span>
+        <span class="eat-slot-name">${nameHtml}</span>
+      </div>`;
+    });
+    html += `</div></div>`;
+  });
+  document.getElementById('eat-schedule-display').innerHTML = html;
+}
+
+function openEatSlotModal(day, type) {
+  editingEatSlot = { day, type };
+  const typeLabels = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
+  document.getElementById('eat-slot-modal-title').textContent = `${typeLabels[type]} — ${day}`;
+
+  const key = day + '-' + type;
+  const current = (state.eatSchedule || {})[key];
+  const clearBtn = document.getElementById('eat-slot-clear-btn');
+
+  if (current) {
+    clearBtn.style.display = '';
+    let currentText = '';
+    if (current.type === 'meal') {
+      const meal = state.meals.find(m => m.id === current.mealId);
+      currentText = `Currently: ${meal ? meal.name : 'Unknown'}`;
+    } else if (current.type === 'leftovers') {
+      const m1 = state.meals.find(m => m.id === current.meal1);
+      const m2 = state.meals.find(m => m.id === current.meal2);
+      currentText = `Currently: Leftovers — ${m1 ? m1.name : '?'} + ${m2 ? m2.name : '?'}`;
+    }
+    document.getElementById('eat-slot-current').innerHTML = `<div class="info-banner" style="margin-bottom:12px">${currentText}</div>`;
+  } else {
+    clearBtn.style.display = 'none';
+    document.getElementById('eat-slot-current').innerHTML = '';
+  }
+
+  // Meal list — all meals in the rotation (not just selected ones)
+  const available = state.meals;
+  let mealListHtml = '';
+  if (!available.length) {
+    mealListHtml = '<div style="color:var(--muted);font-size:13px;padding:8px 0">No meals in your rotation yet.</div>';
+  } else {
+    available.forEach(meal => {
+      const isSelected = current && current.type === 'meal' && current.mealId === meal.id;
+      mealListHtml += `<div class="meal-card ${isSelected ? 'selected' : ''}" style="padding:10px 14px;margin-bottom:6px" onclick="saveEatMeal('${meal.id}')">
+        <div class="meal-name" style="font-size:14px">${meal.name}</div>
+        <div style="font-size:12px;color:var(--muted)">${meal.category} · ${meal.cookDay}</div>
+      </div>`;
+    });
+  }
+  document.getElementById('eat-slot-meal-list').innerHTML = mealListHtml;
+
+  // Leftover dropdowns
+  const optionsHtml = '<option value="">— Select meal —</option>' +
+    available.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  document.getElementById('eat-leftover-1').innerHTML = optionsHtml;
+  document.getElementById('eat-leftover-2').innerHTML = optionsHtml;
+  if (current && current.type === 'leftovers') {
+    document.getElementById('eat-leftover-1').value = current.meal1 || '';
+    document.getElementById('eat-leftover-2').value = current.meal2 || '';
+  }
+
+  document.getElementById('eat-slot-modal').classList.add('open');
+}
+
+function saveEatMeal(mealId) {
+  if (!editingEatSlot) return;
+  if (!state.eatSchedule) state.eatSchedule = {};
+  state.eatSchedule[editingEatSlot.day + '-' + editingEatSlot.type] = { type: 'meal', mealId };
+  saveState();
+  closeEatSlotModal();
+  renderEatSchedule();
+}
+
+function saveEatLeftovers() {
+  if (!editingEatSlot) return;
+  const m1 = document.getElementById('eat-leftover-1').value;
+  const m2 = document.getElementById('eat-leftover-2').value;
+  if (!m1 || !m2) { alert('Please select two meals for leftovers.'); return; }
+  if (m1 === m2) { alert('Please select two different meals.'); return; }
+  if (!state.eatSchedule) state.eatSchedule = {};
+  state.eatSchedule[editingEatSlot.day + '-' + editingEatSlot.type] = { type: 'leftovers', meal1: m1, meal2: m2 };
+  saveState();
+  closeEatSlotModal();
+  renderEatSchedule();
+}
+
+function clearEatSlot() {
+  if (!editingEatSlot) return;
+  if (!state.eatSchedule) state.eatSchedule = {};
+  delete state.eatSchedule[editingEatSlot.day + '-' + editingEatSlot.type];
+  saveState();
+  closeEatSlotModal();
+  renderEatSchedule();
+}
+
+function closeEatSlotModal() {
+  document.getElementById('eat-slot-modal').classList.remove('open');
+  editingEatSlot = null;
 }
 
 // ===================== MODALS =====================
