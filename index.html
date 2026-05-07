@@ -1641,11 +1641,11 @@ function openEatSlotModal(day, type) {
     document.getElementById('eat-slot-current').innerHTML = '';
   }
 
-  // Meal list — all meals in the rotation (not just selected ones)
-  const available = state.meals;
+  // Meal list — only meals selected for this week
+  const available = state.meals.filter(m => state.selectedMeals.includes(m.id));
   let mealListHtml = '';
   if (!available.length) {
-    mealListHtml = '<div style="color:var(--muted);font-size:13px;padding:8px 0">No meals in your rotation yet.</div>';
+    mealListHtml = '<div style="color:var(--muted);font-size:13px;padding:8px 0">No meals selected this week — go to the Meals tab to select what you\'re cooking.</div>';
   } else {
     available.forEach(meal => {
       const isSelected = current && current.type === 'meal' && current.mealId === meal.id;
