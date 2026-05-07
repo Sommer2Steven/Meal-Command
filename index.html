@@ -575,6 +575,59 @@
     line-height: 1.5;
   }
 
+  /* STORE FILTER */
+  .store-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .store-filter-lbl {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 2px;
+  }
+  .store-filter-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .store-filter-btn.active { background: #1e1c14; border-color: var(--accent); color: var(--accent); }
+  .store-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    padding: 2px 7px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .store-btn:hover { border-color: var(--muted); color: var(--text); }
+  .store-btn.sc { background: #1a2240; border-color: #3a5ab0; color: #7090d0; }
+  .store-btn.sw { background: #1a2a3a; border-color: #2a5a8a; color: #5a9ad4; }
+  .store-btn.so { background: #2a2410; border-color: #5a4a20; color: var(--accent); }
+
+  /* LAST WEEK */
+  .last-week-wrap { opacity: 0.55; }
+  .last-week-wrap .eat-slot { cursor: default; }
+
   /* PRINT */
   @media print {
     .app-header, .selection-bar, .tab-btn:not(.active) { display: none !important; }
@@ -625,6 +678,9 @@
     </div>
     <div class="snack-progress-note" id="snack-progress-note">Select snacks below to track kids' coverage · 3 girls · 1 snack/day</div>
   </div>
+  <div style="margin-top:10px">
+    <button class="btn-danger" style="width:100%;padding:10px;font-size:13px;border-radius:8px" onclick="resetWeek()">↺ Reset Week — Start Fresh</button>
+  </div>
 
   <p class="section-label" id="meal-count-label">Meal rotation</p>
   <div id="meals-list"></div>
@@ -669,6 +725,7 @@
   <p class="section-label" style="margin-top:24px">Eat schedule</p>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px;font-family:'DM Mono',monospace">Tap any slot to assign a meal. Use Leftovers to split servings from 2 different meals.</div>
   <div id="eat-schedule-display"></div>
+  <div id="last-week-section" style="margin-top:20px"></div>
   <p class="section-label" style="margin-top:20px">Budget & notes</p>
   <div class="budget-card" id="weekly-budget-card"></div>
   <div style="margin-top:16px">
@@ -808,6 +865,8 @@ const DEFAULT_DATA = {
   mealMultipliers: {},
   cookSelectedMeals: [],
   eatSchedule: {},
+  itemStores: {},
+  lastWeekData: null,
   meals: [
     {id:"m1",name:"Sous Vide Chicken Breast",desc:"Juicy batch chicken — stays moist all week in the fridge",category:"Main Meals",cookDay:"Monday",protein:50,cal:280,cost:12,servings:8,gf:true,split:false,kids:true,
       ingredients:[{amt:"4 lbs",item:"Chicken breast"},{amt:"2 tbsp",item:"Butter"},{amt:"4 cloves",item:"Garlic, smashed"},{amt:"1 tsp",item:"Salt"},{amt:"1 tsp",item:"Garlic powder"},{amt:"1 tsp",item:"Paprika"},{amt:"4 sprigs",item:"Fresh thyme (optional)"}],
@@ -926,6 +985,7 @@ const DEFAULT_DATA = {
 let state = JSON.parse(JSON.stringify(DEFAULT_DATA));
 let editingMealId = null;
 let editingEatSlot = null;
+let groceryFilter = 'all';
 
 function saveState() {
   try { localStorage.setItem('mealplanner', JSON.stringify(state)); } catch(e) {}
@@ -940,6 +1000,8 @@ function loadState() {
       if (!state.selectedSnacks) state.selectedSnacks = [];
       if (!state.itemPrices) state.itemPrices = {};
       if (!state.eatSchedule) state.eatSchedule = {};
+      if (!state.itemStores) state.itemStores = {};
+      if (state.lastWeekData === undefined) state.lastWeekData = null;
     }
   } catch(e) {}
 }
@@ -1291,8 +1353,30 @@ function renderGrocery() {
 
   document.getElementById('budget-display').innerHTML = buildBudgetCardHTML(allItems);
 
-  let html = '';
+  // Store filter bar
+  const storeDefs = [
+    { key: 'all', label: 'All' },
+    { key: 'costco', label: 'Costco' },
+    { key: 'walmart', label: 'Walmart' },
+    { key: 'other', label: 'Other' }
+  ];
+  const storeCounts = { costco: 0, walmart: 0, other: 0 };
+  allItems.forEach(e => { const s = state.itemStores[e.displayItem]; if (s) storeCounts[s] = (storeCounts[s] || 0) + 1; });
+  const unassigned = allItems.filter(e => !state.itemStores[e.displayItem]).length;
+
+  let html = `<div class="store-filter-bar">
+    <span class="store-filter-lbl">Shop at:</span>
+    ${storeDefs.map(s => `<button class="store-filter-btn ${groceryFilter === s.key ? 'active' : ''}" onclick="setGroceryFilter('${s.key}')">${s.label}${s.key !== 'all' ? ` (${storeCounts[s.key] || 0})` : ''}</button>`).join('')}
+    ${groceryFilter !== 'all' && unassigned > 0 ? `<span style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace">${unassigned} unassigned</span>` : ''}
+  </div>`;
+
+  // Filter items by selected store
+  const filteredCats = {};
   Object.entries(cats).forEach(([cat, items]) => {
+    filteredCats[cat] = groceryFilter === 'all' ? items : items.filter(e => state.itemStores[e.displayItem] === groceryFilter);
+  });
+
+  Object.entries(filteredCats).forEach(([cat, items]) => {
     if (!items.length) return;
     const catTotal = items.reduce((s, e) => s + (parseFloat(state.itemPrices[e.displayItem] || 0) || 0), 0);
     html += `<div class="grocery-category">
@@ -1308,11 +1392,19 @@ function renderGrocery() {
       const safeKey = key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
       const ck = state.checkedItems[key] ? 'checked' : '';
       const price = state.itemPrices[key] !== undefined ? state.itemPrices[key] : '';
+      const store = state.itemStores[key] || '';
       html += `<div class="grocery-item ${ck}" id="gi-${safeKey.replace(/[^a-z0-9]/gi,'_')}">
         <div class="gi-check" onclick="toggleCheck('${safeKey}')">${state.checkedItems[key] ? '✓' : ''}</div>
         <div style="flex:1;min-width:0">
           <div class="gi-name">${entry.displayItem}${entry.multiMeals ? ' <span style="font-size:10px;background:#1a2a1e;color:#5ab88a;padding:1px 5px;border-radius:3px;font-family:\'DM Mono\',monospace">shared</span>' : ''}</div>
-          <div class="gi-note">${entry.displayAmt} · ${entry.meals.join(' · ')}</div>
+          <div class="gi-note" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span>${entry.displayAmt} · ${entry.meals.join(' · ')}</span>
+            <span style="display:flex;gap:3px" onclick="event.stopPropagation()">
+              <button class="store-btn ${store === 'costco' ? 'sc' : ''}" onclick="setItemStore('${safeKey}','costco')">C</button>
+              <button class="store-btn ${store === 'walmart' ? 'sw' : ''}" onclick="setItemStore('${safeKey}','walmart')">W</button>
+              <button class="store-btn ${store === 'other' ? 'so' : ''}" onclick="setItemStore('${safeKey}','other')">O</button>
+            </span>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
           <span style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted)">$</span>
@@ -1331,6 +1423,12 @@ function renderGrocery() {
     });
     html += '</div>';
   });
+
+  // If filtered and nothing found
+  if (groceryFilter !== 'all' && !Object.values(filteredCats).some(i => i.length)) {
+    html += `<div class="empty-state" style="padding:24px 20px"><div class="big" style="font-size:24px">NO ITEMS</div>No items assigned to this store yet. Tap C / W / O on any item in the All view.</div>`;
+  }
+
   document.getElementById('grocery-list').innerHTML = html;
 }
 
@@ -1586,6 +1684,110 @@ function renderSchedule() {
   notesArea.oninput = () => { state.notes = notesArea.value; saveState(); };
 
   renderEatSchedule();
+  renderLastWeek();
+}
+
+// ===================== RESET WEEK =====================
+function resetWeek() {
+  if (!confirm('Start a fresh week? Meal selections, grocery list, cook mode, and eat schedule will be cleared. Your meal rotation stays intact.')) return;
+
+  // Snapshot eat schedule with names before clearing (so it stays readable if meals change)
+  const eatSnapshot = {};
+  Object.entries(state.eatSchedule || {}).forEach(([key, val]) => {
+    if (val.type === 'meal') {
+      const meal = state.meals.find(m => m.id === val.mealId);
+      if (meal) eatSnapshot[key] = { type: 'meal', name: meal.name };
+    } else if (val.type === 'leftovers') {
+      const m1 = state.meals.find(m => m.id === val.meal1);
+      const m2 = state.meals.find(m => m.id === val.meal2);
+      eatSnapshot[key] = { type: 'leftovers', name1: m1 ? m1.name : '?', name2: m2 ? m2.name : '?' };
+    }
+  });
+  if (Object.keys(eatSnapshot).length) {
+    state.lastWeekData = { eatSchedule: eatSnapshot };
+  }
+
+  state.selectedMeals = [];
+  state.selectedSnacks = [];
+  state.mealMultipliers = {};
+  state.cookSelectedMeals = [];
+  state.checkedItems = {};
+  state.itemPrices = {};
+  state.itemStores = {};
+  state.eatSchedule = {};
+  groceryFilter = 'all';
+
+  saveState();
+  renderMeals();
+  renderSnacks();
+}
+
+// ===================== STORE ASSIGNMENT =====================
+function setGroceryFilter(store) {
+  groceryFilter = store;
+  renderGrocery();
+}
+
+function setItemStore(key, store) {
+  if (state.itemStores[key] === store) {
+    delete state.itemStores[key]; // tap active store to unassign
+  } else {
+    state.itemStores[key] = store;
+  }
+  saveState();
+  renderGrocery();
+}
+
+// ===================== LAST WEEK DISPLAY =====================
+function renderLastWeek() {
+  const el = document.getElementById('last-week-section');
+  if (!el) return;
+  const lwd = state.lastWeekData;
+  if (!lwd || !Object.keys(lwd.eatSchedule || {}).length) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const slotDefs = [
+    { key: 'breakfast', label: 'B' },
+    { key: 'lunch',     label: 'L' },
+    { key: 'dinner',    label: 'D' }
+  ];
+
+  let innerHtml = '';
+  days.forEach(day => {
+    const hasAny = slotDefs.some(s => lwd.eatSchedule[day + '-' + s.key]);
+    if (!hasAny) return;
+    innerHtml += `<div class="schedule-row" style="margin-bottom:12px">
+      <div class="schedule-day">${day.slice(0,3).toUpperCase()}</div>
+      <div class="schedule-meals" style="display:flex;flex-direction:column;gap:5px;flex:1">`;
+    slotDefs.forEach(slot => {
+      const val = lwd.eatSchedule[day + '-' + slot.key];
+      if (!val) return;
+      let nameHtml = '', cardClass = '';
+      if (val.type === 'meal') {
+        nameHtml = val.name;
+        cardClass = 'eat-slot-filled';
+      } else if (val.type === 'leftovers') {
+        nameHtml = `<span class="leftover-tag">LEFTOVERS</span>${val.name1} <span style="color:var(--muted)">+</span> ${val.name2}`;
+        cardClass = 'eat-slot-leftovers';
+      }
+      innerHtml += `<div class="eat-slot ${cardClass}" style="cursor:default">
+        <span class="eat-slot-type">${slot.label}</span>
+        <span class="eat-slot-name">${nameHtml}</span>
+      </div>`;
+    });
+    innerHtml += `</div></div>`;
+  });
+
+  if (!innerHtml) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `<details>
+    <summary style="cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);padding:8px 0;user-select:none">Last week's schedule ▾</summary>
+    <div style="font-size:12px;color:var(--muted);margin:8px 0 10px;font-family:'DM Mono',monospace">Reference only — from before you reset the week.</div>
+    <div class="last-week-wrap">${innerHtml}</div>
+  </details>`;
 }
 
 // ===================== EAT SCHEDULE =====================
