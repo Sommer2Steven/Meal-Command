@@ -1235,6 +1235,49 @@ function buildGroceryList() {
   return sorted;
 }
 
+function buildBudgetCardHTML(allItems) {
+  const realTotal = allItems.reduce((sum, entry) => {
+    const p = parseFloat(state.itemPrices[entry.displayItem] || 0);
+    return sum + (isNaN(p) ? 0 : p);
+  }, 0);
+  const estTotal = state.meals.filter(m => state.selectedMeals.includes(m.id)).reduce((s, m) => s + m.cost * getMult(m.id), 0);
+  const displayTotal = realTotal > 0 ? realTotal : estTotal;
+  const pct = Math.min(100, Math.round((displayTotal / state.budget) * 100));
+  const pricesEntered = allItems.filter(e => state.itemPrices[e.displayItem] !== undefined).length;
+  const hasActual = realTotal > 0;
+
+  return `<div class="budget-card">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+      <div>
+        <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px">Estimate</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:26px;color:var(--muted)">$${estTotal.toFixed(0)}</div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px">Actual</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:26px;color:${hasActual ? 'var(--accent)' : 'var(--border)'}">
+          ${hasActual ? '$' + realTotal.toFixed(2) : '—'}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px">Budget</div>
+        <div style="font-family:'DM Mono',monospace;font-size:20px;color:var(--text)">$${state.budget}</div>
+      </div>
+    </div>
+    <div class="budget-bar-bg"><div class="budget-bar-fill ${pct >= 100 ? 'over' : ''}" style="width:${pct}%"></div></div>
+    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px;display:flex;justify-content:space-between">
+      <span>${pct < 100 ? `$${(state.budget - displayTotal).toFixed(2)} under` : `$${(displayTotal - state.budget).toFixed(2)} over`} · ${pct}%</span>
+      <span>${pricesEntered}/${allItems.length} prices entered</span>
+    </div>
+    ${hasActual
+      ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="font-size:12px;color:var(--muted);line-height:1.4">Push actual prices → update meal cost estimates on the Meals tab.</div>
+          <button class="btn-secondary" style="flex-shrink:0;font-size:12px;padding:7px 12px" onclick="syncMealCostsFromActuals()">Sync Estimates →</button>
+        </div>`
+      : `<div style="font-size:11px;color:var(--muted);margin-top:6px;font-family:'DM Mono',monospace">Enter prices next to items to track actual spend</div>`
+    }
+  </div>`;
+}
+
 function renderGrocery() {
   if (!state.selectedMeals.length) {
     document.getElementById('budget-display').innerHTML = '';
@@ -1243,43 +1286,10 @@ function renderGrocery() {
   }
 
   const cats = buildGroceryList();
-
-  // Compute real total from itemPrices (actual prices entered by user)
-  // Fall back to 0 for items with no price entered yet
   let allItems = [];
   Object.values(cats).forEach(items => allItems = allItems.concat(items));
-  const realTotal = allItems.reduce((sum, entry) => {
-    const p = parseFloat(state.itemPrices[entry.displayItem] || 0);
-    return sum + (isNaN(p) ? 0 : p);
-  }, 0);
 
-  // Estimated total from meal costs (always shown as reference)
-  const estTotal = state.meals.filter(m => state.selectedMeals.includes(m.id)).reduce((s, m) => s + m.cost * getMult(m.id), 0);
-
-  const useReal = realTotal > 0;
-  const displayTotal = useReal ? realTotal : estTotal;
-  const pct = Math.min(100, Math.round((displayTotal / state.budget) * 100));
-  const pricesEntered = allItems.filter(e => state.itemPrices[e.displayItem] !== undefined).length;
-
-  document.getElementById('budget-display').innerHTML = `
-    <div class="budget-card">
-      <div class="budget-row">
-        <div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:2px">${useReal ? 'Actual spend' : 'Est. meal cost'}</div>
-          <div class="budget-total">$${displayTotal.toFixed(2)}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:12px;color:var(--muted);margin-bottom:2px">Budget</div>
-          <div style="font-family:'DM Mono',monospace;font-size:20px;color:var(--text)">$${state.budget}</div>
-        </div>
-      </div>
-      <div class="budget-bar-bg"><div class="budget-bar-fill ${pct >= 100 ? 'over' : ''}" style="width:${pct}%"></div></div>
-      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px;display:flex;justify-content:space-between">
-        <span>${pct < 100 ? `$${(state.budget - displayTotal).toFixed(2)} under budget` : `$${(displayTotal - state.budget).toFixed(2)} over budget`} · ${pct}%</span>
-        <span>${pricesEntered}/${allItems.length} prices entered</span>
-      </div>
-      ${!useReal ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;font-family:'DM Mono',monospace">Tap $ next to each item to enter real prices</div>` : ''}
-    </div>`;
+  document.getElementById('budget-display').innerHTML = buildBudgetCardHTML(allItems);
 
   let html = '';
   Object.entries(cats).forEach(([cat, items]) => {
@@ -1337,44 +1347,47 @@ function updateItemPrice(key, val) {
 }
 
 function refreshBudgetDisplay() {
-  // Recompute totals without re-rendering the list
   const cats = buildGroceryList();
   let allItems = [];
   Object.values(cats).forEach(items => allItems = allItems.concat(items));
-  const realTotal = allItems.reduce((sum, entry) => {
-    const p = parseFloat(state.itemPrices[entry.displayItem] || 0);
-    return sum + (isNaN(p) ? 0 : p);
-  }, 0);
-  const estTotal = state.meals.filter(m => state.selectedMeals.includes(m.id)).reduce((s, m) => s + m.cost * getMult(m.id), 0);
-  const useReal = realTotal > 0;
-  const displayTotal = useReal ? realTotal : estTotal;
-  const pct = Math.min(100, Math.round((displayTotal / state.budget) * 100));
-  const pricesEntered = allItems.filter(e => state.itemPrices[e.displayItem] !== undefined).length;
+  document.getElementById('budget-display').innerHTML = buildBudgetCardHTML(allItems);
+}
 
-  document.getElementById('budget-display').innerHTML = `
-    <div class="budget-card">
-      <div class="budget-row">
-        <div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:2px">${useReal ? 'Actual spend' : 'Est. meal cost'}</div>
-          <div class="budget-total">$${displayTotal.toFixed(2)}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:12px;color:var(--muted);margin-bottom:2px">Budget</div>
-          <div style="font-family:'DM Mono',monospace;font-size:20px;color:var(--text)">$${state.budget}</div>
-        </div>
-      </div>
-      <div class="budget-bar-bg"><div class="budget-bar-fill ${pct >= 100 ? 'over' : ''}" style="width:${pct}%"></div></div>
-      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px;display:flex;justify-content:space-between">
-        <span>${pct < 100 ? `$${(state.budget - displayTotal).toFixed(2)} under budget` : `$${(displayTotal - state.budget).toFixed(2)} over budget`} · ${pct}%</span>
-        <span>${pricesEntered}/${allItems.length} prices entered</span>
-      </div>
-      ${!useReal ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;font-family:'DM Mono',monospace">Tap $ next to each item to enter real prices</div>` : ''}
-    </div>`;
+function syncMealCostsFromActuals() {
+  const cats = buildGroceryList();
+  let allItems = [];
+  Object.values(cats).forEach(items => allItems = allItems.concat(items));
 
-  // Also update category subtotals inline
-  Object.entries(buildGroceryList()).forEach(([cat, items]) => {
-    const catTotal = items.reduce((s, e) => s + (parseFloat(state.itemPrices[e.displayItem] || 0) || 0), 0);
+  const pricedItems = allItems.filter(e => state.itemPrices[e.displayItem] !== undefined && parseFloat(state.itemPrices[e.displayItem]) > 0);
+  if (!pricedItems.length) {
+    alert('No actual prices entered yet. Enter prices on the grocery list first.');
+    return;
+  }
+
+  // Distribute each item\'s actual cost equally across the meals that use it
+  const mealActualCost = {};
+  pricedItems.forEach(entry => {
+    const price = parseFloat(state.itemPrices[entry.displayItem]);
+    const share = price / entry.meals.length;
+    entry.meals.forEach(mealName => {
+      mealActualCost[mealName] = (mealActualCost[mealName] || 0) + share;
+    });
   });
+
+  let updatedCount = 0;
+  state.meals.forEach(meal => {
+    if (mealActualCost[meal.name] !== undefined) {
+      meal.cost = Math.round(mealActualCost[meal.name]);
+      updatedCount++;
+    }
+  });
+
+  if (updatedCount) {
+    saveState();
+    renderMeals();
+    refreshBudgetDisplay();
+    alert(`Updated cost estimates for ${updatedCount} meal${updatedCount !== 1 ? 's' : ''} based on actual prices.`);
+  }
 }
 
 function toggleCheck(key) {
